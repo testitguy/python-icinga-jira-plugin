@@ -11,7 +11,7 @@ from __future__ import print_function
 
 import os
 import sys
-import ConfigParser
+import configparser
 import textwrap
 from abc import ABCMeta, abstractmethod
 
@@ -50,12 +50,14 @@ class IcingaEnvironment(object):
                'service_problem_id': 'ICINGA_SERVICEPROBLEMID',
                'service_state': 'ICINGA_SERVICESTATE',
                'short_date_time': 'ICINGA_SHORTDATETIME',
+	           'component': 'ICINGA_COMPONENT', #to set the component in jira
+	           'priority' : 'ICINGA_PRIORITY'   #to set the priority in jira
                }
 
     ICINGA_PREFIX = "ICI"
 
     def __init__(self, environment):
-        for attribute_name, argument_name in self.MAPPING.iteritems():
+        for attribute_name, argument_name in self.MAPPING.items():
             if argument_name in environment and environment[argument_name] not in [None, '']:
                 setattr(self, attribute_name, environment[argument_name])
             else:
@@ -127,7 +129,7 @@ class IcingaEnvironment(object):
         return self.last_host_problem_id
 
     def _create_icinga_label(self, icinga_id):
-        return "%s#%s#%s" % (self.ICINGA_PREFIX, icinga_id, self.host_name)
+        return "%s#%s#%s" % (self.ICINGA_PREFIX.replace(" ", "_"), icinga_id, self.host_name.replace(" ", "_")) #.replace(" ", "_") handels whitespaces in the names of hosts or services, otherwise the jira API would not handle them
 
     def get_jira_recovery_label(self):
         return self._create_icinga_label(self.get_recovery_last_problem_id())
@@ -188,7 +190,7 @@ class Issue(object):
             {% endif %}
 
             {% if notification_type == "RECOVERY" %}
-            This ticket was closed automatically.
+            This ticket was resolved automatically.
             {% endif %}
         """)
         template = Template(DESCRIPTION_TEMPLATE, trim_blocks=True)
@@ -213,7 +215,10 @@ class OpenIssue(Issue):
                 'summary': self._create_summary(),
                 'description': self.create_description(),
                 'issuetype': {'name': self.issue_type},
-                'labels': self.icinga_environment.create_labels_list()
+                'labels': self.icinga_environment.create_labels_list(),
+		#'customfield_11871': { "value": "Yes" }, #to set the second lvl field in our jira, you can replace it with any custom field you want
+                'components': [{"name": self.icinga_environment.component}], #to set the component in jira, you will need to set the priority in the host/service template "vars.component = "Linux"" 
+		'priority' : { "name": self.icinga_environment.priority } #to set the priority in jira, you will need to set the priority in the host/service template "vars.priority = "High""
                 }
 
     def _create_summary(self):
@@ -262,7 +267,7 @@ class CloseIssue(Issue):
 
     def _get_close_transition(self, issue):
         for transition in self.jira.transitions(issue):
-            if transition['name'] == 'Close':
+            if transition['name'] == 'Resolve':
                 return int(transition['id'])
         raise CantCloseTicketException(
             "Ticket does not have 'Close' transition; maybe it's already closed")
@@ -274,7 +279,7 @@ def open_jira_session(server, username, password, verify=False):
 
 
 def parse_and_validate_config_file(file_pointer):
-    config_parser = ConfigParser.ConfigParser()
+    config_parser = configparser.ConfigParser()
     config_parser.readfp(file_pointer)
     config = dict(config_parser.items('settings'))
     for key in MANDATORY_CONFIG_ENTRIES:
@@ -312,7 +317,7 @@ if __name__ == '__main__':
     except ValueError as e:
         print(e)
         print_usage_and_exit(args)
-    except ConfigParser.NoSectionError as e:
+    except configparser.NoSectionError as e:
         print("Configuration file is corrupt: %s" % e)
         print_usage_and_exit(args)
 
